@@ -1,54 +1,5 @@
 import numpy as np
-
-# ------------------------------ pomocnicze ------------------------------
-
-
-def norm(x):
-    return np.linalg.norm(x)
-
-
-def numerical_gradient(f, x, h=1e-6):
-    x = np.array(x, dtype=float)
-    grad = np.zeros_like(x)
-
-    for i in range(len(x)):
-        xp = x.copy()
-        xm = x.copy()
-        xp[i] += h
-        xm[i] -= h
-        grad[i] = (f(xp) - f(xm)) / (2 * h)
-
-    return grad
-
-
-def golden_section_search(phi, a=0.0, b=1.0, tolerance=1e-7, max_iter=200):
-    gr = (np.sqrt(5) - 1) / 2
-
-    c = b - gr * (b - a)
-    d = a + gr * (b - a)
-
-    fc = phi(c)
-    fd = phi(d)
-
-    for _ in range(max_iter):
-        if abs(b - a) < tolerance:
-            break
-
-        if fc < fd:
-            b = d
-            d = c
-            fd = fc
-            c = b - gr * (b - a)
-            fc = phi(c)
-        else:
-            a = c
-            c = d
-            fc = fd
-            d = a + gr * (b - a)
-            fd = phi(d)
-
-    return (a + b) / 2
-
+import matplotlib.pyplot as plt
 
 # ------------------------------ funkcje z zadania ------------------------------
 
@@ -112,6 +63,7 @@ def hooke_jeeves(f, x0, delta=1.0, epsilon=1e-6, max_iter=10000):
             if f(x + delta * direction) < f(x):
                 x = x + delta * direction
                 improved = True
+
             elif f(x - delta * direction) < f(x):
                 x = x - delta * direction
                 improved = True
@@ -127,66 +79,78 @@ def hooke_jeeves(f, x0, delta=1.0, epsilon=1e-6, max_iter=10000):
 # ------------------------------ metoda Neldera-Meada ------------------------------
 
 
-def nelder_mead(f, x0, step=1.0, epsilon=1e-6, max_iter=10000):
+def simplex_average_size(points):
+    distances = []
+
+    for i in range(len(points)):
+        for j in range(i + 1, len(points)):
+            distances.append(np.linalg.norm(points[i] - points[j]))
+
+    return sum(distances) / len(distances)
+
+
+def sort_points(f, points):
+    points = sorted(points, key=f)
+    return np.array(points)
+
+
+def nelder_mead(f, x0, epsilon=1e-6, max_iter=10000):
     x0 = np.array(x0, dtype=float)
-    n = len(x0)
 
-    simplex = [x0]
-    for i in range(n):
-        x = x0.copy()
-        x[i] += step
-        simplex.append(x)
+    x1 = np.array([x0[0] + 1, x0[1]])
+    x2 = np.array([x0[0], x0[1] + 1])
 
-    simplex = np.array(simplex)
+    points = np.array([x0, x1, x2])
+    iterations = 0
 
-    for iteration in range(max_iter):
-        values = np.array([f(x) for x in simplex])
-        order = np.argsort(values)
-        simplex = simplex[order]
-        values = values[order]
+    while simplex_average_size(points) > epsilon and iterations < max_iter:
+        iterations += 1
 
-        best = simplex[0]
-        worst = simplex[-1]
-        second_worst_value = values[-2]
+        points = sort_points(f, points)
 
-        diameter = max(norm(simplex[i] - best) for i in range(n + 1))
-        if diameter < epsilon:
-            return best, f(best), iteration
+        best = points[0]
+        mid = points[1]
+        worst = points[2]
 
-        c = np.mean(simplex[:-1], axis=0)
+        middle_point = (best + mid) / 2
 
-        xr = c + (c - worst)
-        fr = f(xr)
+        # odbicie
+        reflection = 2 * middle_point - worst
 
-        if fr < values[1]:
-            xs = c + 2 * (c - worst)
-            if f(xs) < fr:
-                simplex[-1] = xs
+        if f(reflection) < f(mid):
+            if f(reflection) < f(best):
+                # ekspansja
+                better_reflection = middle_point + 2 * (reflection - middle_point)
+
+                if f(better_reflection) < f(reflection):
+                    worst = better_reflection
+                else:
+                    worst = reflection
             else:
-                simplex[-1] = xr
-
-        elif values[1] <= fr < second_worst_value:
-            simplex[-1] = xr
-
-        elif second_worst_value <= fr < values[-1]:
-            xz = c + 0.5 * (c - worst)
-            if f(xz) < fr:
-                simplex[-1] = xz
-            else:
-                for i in range(1, n + 1):
-                    simplex[i] = best + 0.5 * (simplex[i] - best)
+                worst = reflection
 
         else:
-            xw = c - 0.5 * (c - worst)
-            if f(xw) < values[-1]:
-                simplex[-1] = xw
-            else:
-                for i in range(1, n + 1):
-                    simplex[i] = best + 0.5 * (simplex[i] - best)
+            # kontrakcja
+            p1 = (worst + middle_point) / 2
+            p2 = (reflection + middle_point) / 2
 
-    values = np.array([f(x) for x in simplex])
-    best = simplex[np.argmin(values)]
-    return best, f(best), max_iter
+            if f(p2) < f(p1):
+                p1 = p2
+
+            if f(p1) < f(worst):
+                worst = p1
+
+            else:
+                # zmniejszenie trójkąta
+                mid = (mid + best) / 2
+                worst = (worst + best) / 2
+
+        points = np.array([best, mid, worst])
+
+    points = sort_points(f, points)
+    best = points[0]
+
+    return best, f(best), iterations
 
 
 # ------------------------------ metoda najszybszego spadku ------------------------------
@@ -194,22 +158,27 @@ def nelder_mead(f, x0, step=1.0, epsilon=1e-6, max_iter=10000):
 
 def steepest_descent(f, grad_f, x0, epsilon=1e-6, max_iter=10000):
     x = np.array(x0, dtype=float)
+    iterations = 0
 
-    for iteration in range(max_iter):
+    while np.linalg.norm(grad_f(x)) > epsilon and iterations < max_iter:
         grad = grad_f(x)
 
-        if norm(grad) < epsilon:
-            return x, f(x), iteration
-
+        # kierunek największego spadku
         direction = -grad
 
-        def phi(t):
-            return f(x + t * direction)
+        alpha = 1.0
 
-        t = golden_section_search(phi, 0, 1)
-        x = x + t * direction
+        # proste szukanie kroku
+        while f(x + alpha * direction) >= f(x):
+            alpha /= 2
 
-    return x, f(x), max_iter
+            if alpha < 1e-12:
+                break
+
+        x = x + alpha * direction
+        iterations += 1
+
+    return x, f(x), iterations
 
 
 # ------------------------------ metoda BFGS ------------------------------
@@ -218,36 +187,53 @@ def steepest_descent(f, grad_f, x0, epsilon=1e-6, max_iter=10000):
 def bfgs(f, grad_f, x0, epsilon=1e-6, max_iter=10000):
     x = np.array(x0, dtype=float)
     n = len(x)
+
+    # V to przybliżenie odwrotności hesjanu
     V = np.eye(n)
 
-    for iteration in range(max_iter):
+    iterations = 0
+
+    while np.linalg.norm(grad_f(x)) > epsilon and iterations < max_iter:
         grad = grad_f(x)
 
-        if norm(grad) < epsilon:
-            return x, f(x), iteration
-
+        # kierunek BFGS
         direction = -V @ grad
 
-        def phi(t):
-            return f(x + t * direction)
+        # zabezpieczenie: jeśli kierunek nie jest kierunkiem spadku, wracamy do zwykłego największego spadku
+        if grad @ direction >= 0:
+            V = np.eye(n)
+            direction = -grad
 
-        t = golden_section_search(phi, 0, 1)
-        x_new = x + t * direction
+        alpha = 1.0
+
+        # proste szukanie kroku
+        while f(x + alpha * direction) >= f(x):
+            alpha /= 2
+
+            if alpha < 1e-12:
+                break
+
+        x_new = x + alpha * direction
         grad_new = grad_f(x_new)
 
-        r = x_new - x
-        s = grad_new - grad
-        rs = r @ s
+        r = x_new - x # zmiana punktu
+        s = grad_new - grad # zmiana gradientu
 
-        if abs(rs) > 1e-12:
-            I = np.eye(n)
-            V = (I - np.outer(r, s) / rs) @ V @ (I - np.outer(s, r) / rs) + np.outer(r, r) / rs
-        else:
-            V = np.eye(n)
+        denominator = s @ r
+
+        # aktualizacja BFGS
+        if denominator > 1e-12:
+            Vs = V @ s
+
+            V = V + (
+                (1 + (s @ Vs) / denominator) * np.outer(r, r) / denominator
+                - (np.outer(Vs, r) + np.outer(r, Vs)) / denominator
+            )
 
         x = x_new
+        iterations += 1
 
-    return x, f(x), max_iter
+    return x, f(x), iterations
 
 
 # ------------------------------ zad 1 ------------------------------
@@ -289,6 +275,10 @@ def exercise_1():
     }
 
     for function_name, (f, grad_f) in functions.items():
+        print()
+        print("Funkcja", function_name)
+        print("-" * 40)
+
         for method_name, method in no_gradient_methods.items():
             test_method_on_function(method, method_name, function_name, f)
 
@@ -296,119 +286,164 @@ def exercise_1():
             test_method_on_function(method, method_name, function_name, f, grad_f)
 
 
-# ------------------------------ zad 2 ------------------------------
-
-# Numer albumu 287337 jest nieparzysty, więc wybieram metodę wewnętrznej funkcji kary.
-# Minimalizuję funkcję z punktu 1b na kole x^2 + y^2 <= 1.
-# Minimum bez ograniczeń jest w punkcie (1, -2), czyli poza kołem,
-# więc minimum z ograniczeniem powinno leżeć na brzegu obszaru.
+# ------------------------------ zad 2 - zewnętrzna funkcja kary ------------------------------
 
 
-def circle_constraint(x):
+def g_circle(x):
+    # g(x) = x[0]^2 + x[1]^2 - 1
+    
     return x[0]**2 + x[1]**2 - 1
 
 
-def internal_penalty_function(f, rho):
+def external_penalty_function(f, constraints, rho):
+    # Kara pojawia się tylko wtedy, gdy punkt wychodzi poza obszar dopuszczalny.
+    
     def f_penalty(x):
-        g = circle_constraint(x)
+        penalty = 0.0
 
-        if g >= 0:
-            return 1e100
+        for g in constraints:
+            penalty += max(0, g(x))**2 # jezeli jest w kole to jest ujemne wiec wezmiemy 0
 
-        return f(x) + rho / (-g)
+        return f(x) + rho * penalty
 
     return f_penalty
 
 
-def safe_bfgs_inside_circle(f, x0, epsilon=1e-6, max_iter=10000):
-    def grad_f(x):
-        return numerical_gradient(f, x)
+def external_penalty_method(
+    f,
+    constraints,
+    x0,
+    method,
+    rho_start=1.0,
+    rho_multiplier=10.0,
+    epsilon=1e-6,
+    max_outer_iter=20
+):
 
     x = np.array(x0, dtype=float)
-    n = len(x)
-    V = np.eye(n)
+    rho = rho_start
 
-    for iteration in range(max_iter):
-        grad = grad_f(x)
+    iterations = 0
 
-        if norm(grad) < epsilon:
-            return x, f(x), iteration
+    for i in range(max_outer_iter):
+        f_penalty = external_penalty_function(f, constraints, rho)
 
-        direction = -V @ grad
-        t_max = 1.0
+        x_new, f_penalty_min, inner_iterations = method(f_penalty, x)
 
-        while circle_constraint(x + t_max * direction) >= 0:
-            t_max /= 2
-            if t_max < 1e-12:
-                return x, f(x), iteration
+        iterations += inner_iterations
 
-        def phi(t):
-            return f(x + t * direction)
-
-        t = golden_section_search(phi, 0, t_max)
-        x_new = x + t * direction
-        grad_new = grad_f(x_new)
-
-        r = x_new - x
-        s = grad_new - grad
-        rs = r @ s
-
-        if abs(rs) > 1e-12:
-            I = np.eye(n)
-            V = (I - np.outer(r, s) / rs) @ V @ (I - np.outer(s, r) / rs) + np.outer(r, r) / rs
-        else:
-            V = np.eye(n)
-
-        x = x_new
-
-    return x, f(x), max_iter
-
-
-def internal_penalty_method(f, x0, rhos, epsilon=1e-6):
-    x = np.array(x0, dtype=float)
-    previous_x = None
-
-    for i, rho in enumerate(rhos):
-        f_penalty = internal_penalty_function(f, rho)
-        x, _, iterations = safe_bfgs_inside_circle(f_penalty, x)
-
-        print("iteracja kary:", i + 1)
-        print("rho:", rho)
-        print("x:", x)
-        print("f(x):", f(x))
-        print("g(x):", circle_constraint(x))
-        print("iterations:", iterations)
-        print()
-
-        if previous_x is not None and norm(x - previous_x) < epsilon:
+        if np.linalg.norm(x_new - x) < epsilon:
+            x = x_new
             break
 
-        previous_x = x.copy()
+        x = x_new
+        rho *= rho_multiplier
 
-    return x, f(x)
+    return x, f(x), iterations, rho
+
+def plot_exercise_2(x_min):
+    # koło x^2 + y^2 <= 1
+    t = np.linspace(0, 2 * np.pi, 400)
+    circle_x = np.cos(t)
+    circle_y = np.sin(t)
+
+    # zwykłe minimum funkcji f_1b bez ograniczeń
+    unconstrained_min = np.array([1.0, -2.0])
+
+    plt.figure(figsize=(7, 7))
+
+    # obszar dopuszczalny
+    plt.plot(circle_x, circle_y, label="brzeg obszaru: x^2 + y^2 = 1")
+    plt.fill(circle_x, circle_y, alpha=0.15)
+
+    # zwykłe minimum
+    plt.scatter(
+        unconstrained_min[0],
+        unconstrained_min[1],
+        marker="x",
+        s=120,
+        label="minimum bez ograniczeń"
+    )
+
+    # nasze minimum z karą
+    plt.scatter(
+        x_min[0],
+        x_min[1],
+        marker="o",
+        s=80,
+        label="minimum z ograniczeniem"
+    )
+
+    # opisy punktów
+    plt.text(
+        unconstrained_min[0] + 0.05,
+        unconstrained_min[1],
+        "(1, -2)"
+    )
+
+    plt.text(
+        x_min[0] + 0.05,
+        x_min[1],
+        f"({x_min[0]:.3f}, {x_min[1]:.3f})"
+    )
+
+    # osie
+    plt.axhline(0, linewidth=0.8)
+    plt.axvline(0, linewidth=0.8)
+
+    plt.gca().set_aspect("equal", adjustable="box")
+
+    plt.xlim(-1.5, 1.5)
+    plt.ylim(-2.3, 1.3)
+
+    plt.xlabel("x")
+    plt.ylabel("y")
+    plt.title("Zadanie 2: minimum funkcji f_1b w kole jednostkowym")
+    plt.legend()
+    plt.grid(True)
+
+    plt.show()
+
 
 
 def exercise_2():
     print("-------------- zad 2 --------------")
 
-    x0 = np.array([0.0, 0.0])
-    rhos = [1, 0.5, 0.25, 0.1, 0.05, 0.025, 0.01, 0.005, 0.001]
-
-    x_min, f_min = internal_penalty_method(f_1b, x0, rhos)
-
-    print("wynik końcowy")
-    print("x_min:", x_min)
-    print("f_min:", f_min)
-    print("g(x_min):", circle_constraint(x_min))
+    print("Wybrana funkcja: f_1b")
+    print("Ograniczenie: x^2 + y^2 <= 1")
+    print("Metoda: zewnętrzna funkcja kary + Nelder-Mead")
     print()
 
+    x0 = np.array([0.5, 0.5])
 
-# ------------------------------ uruchomienie ------------------------------
+    constraints = [g_circle]
 
+    x_min, f_min, iterations, rho = external_penalty_method(
+        f=f_1b,
+        constraints=constraints,
+        x0=x0,
+        method=nelder_mead,
+        rho_start=1.0,
+        rho_multiplier=10.0,
+        epsilon=1e-6,
+        max_outer_iter=20
+    )
 
-def main():
-    exercise_1()
-    exercise_2()
+    print("x_min:", x_min)
+    print("f_min:", f_min)
+    print("g(x_min):", g_circle(x_min))
+    print("iterations:", iterations)
+    print("rho:", rho)
 
+    if g_circle(x_min) <= 1e-6:
+        print("Punkt spełnia ograniczenie.")
+    else:
+        print("Punkt NIE spełnia ograniczenia.")
 
-main()
+    print()
+    print("Dla porównania zwykłe minimum funkcji f_1b bez ograniczeń to punkt [1, -2].")
+    print("Ten punkt nie należy do koła x^2 + y^2 <= 1, więc minimum z ograniczeniem leży na brzegu obszaru.")
+    plot_exercise_2(x_min)
+
+exercise_1()
+exercise_2()
